@@ -4,11 +4,13 @@ import {
   Copy,
   Eye,
   FilePlus2,
+  Globe2,
   Loader2,
   Pencil,
   RefreshCcw,
   Send,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -69,6 +71,32 @@ function fieldLabel(key: keyof Site) {
   return labels[key] || key;
 }
 
+async function fetchCnpjData(digits: string) {
+  const serverResponse = await fetch(`/api/cnpj/${digits}`, { cache: "no-store" });
+  const serverData = (await serverResponse.json()) as BrasilApiCompany & {
+    error?: string;
+  };
+
+  if (serverResponse.ok) return serverData;
+
+  try {
+    const directResponse = await fetch(
+      `https://brasilapi.com.br/api/cnpj/v1/${digits}`,
+      { cache: "no-store" }
+    );
+    if (directResponse.ok) {
+      return (await directResponse.json()) as BrasilApiCompany;
+    }
+  } catch {
+    // The backend already tried multiple providers; this is just a browser-side rescue.
+  }
+
+  throw new Error(
+    serverData.error ||
+      "Não consegui consultar esse CNPJ agora. Preencha manualmente ou tente novamente."
+  );
+}
+
 export function SiteGeneratorPanel({
   initialSites,
   storageMode
@@ -93,6 +121,7 @@ export function SiteGeneratorPanel({
       : storageMode === "local"
         ? "local dev"
         : "Supabase pendente";
+  const isEditing = Boolean(form.id);
 
   useEffect(() => {
     setSites(initialSites);
@@ -128,9 +157,7 @@ export function SiteGeneratorPanel({
     setMessage("");
 
     try {
-      const response = await fetch(`/api/cnpj/${digits}`);
-      const data = (await response.json()) as BrasilApiCompany & { error?: string };
-      if (!response.ok) throw new Error(data.error || "CNPJ não encontrado.");
+      const data = await fetchCnpjData(digits);
 
       const razaoSocial = data.razao_social || "";
       const nomeFantasia = data.nome_fantasia || razaoSocial;
@@ -187,7 +214,11 @@ export function SiteGeneratorPanel({
       if (!response.ok) throw new Error(data.error || "Não consegui publicar.");
       setForm(data.site);
       await refreshSites();
-      setMessage(`Publicado: ${data.site.fullDomain}`);
+      setMessage(
+        isEditing
+          ? `Alterações salvas: ${data.site.fullDomain}`
+          : `Publicado: ${data.site.fullDomain}`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao publicar.");
     } finally {
@@ -202,6 +233,24 @@ export function SiteGeneratorPanel({
       setSites((current) => current.filter((item) => item.id !== site.id));
       if (form.id === site.id) setForm(emptySite);
       setMessage("Site excluído.");
+    }
+  }
+
+  function editSite(site: Site) {
+    setForm(site);
+    setMessage(
+      "Editando site publicado. Altere domínio, dados ou Meta Tag e clique em SALVAR ALTERAÇÕES."
+    );
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  function newSite() {
+    setForm(emptySite);
+    setMessage("Novo site. Digite o CNPJ para gerar os dados.");
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }
 
@@ -246,8 +295,8 @@ export function SiteGeneratorPanel({
               Gerador de site por CNPJ
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-              Gera os dados, salva o tema fixo e publica no slug/subdomínio sem
-              download manual.
+              Gere, publique, edite metatag depois e administre todos os sites
+              em um só lugar.
             </p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
@@ -260,8 +309,9 @@ export function SiteGeneratorPanel({
 
         {missingSupabaseOnVercel ? (
           <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
-            Configure `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-            e `SUPABASE_SERVICE_ROLE_KEY` na Vercel para salvar/publicar sites.
+            Configure `NEXT_PUBLIC_SUPABASE_URL`,
+            `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY` na
+            Vercel para salvar/publicar sites.
           </div>
         ) : null}
 
@@ -270,6 +320,29 @@ export function SiteGeneratorPanel({
             onSubmit={publish}
             className="rounded-lg border border-white/10 bg-panel-card p-5 shadow-glow"
           >
+            <div className="mb-5 flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-black text-white">
+                  {isEditing ? "Editando site publicado" : "Novo site"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  {isEditing
+                    ? "Cole a Meta Tag, ajuste dados ou domínio e salve sem recriar o site."
+                    : "Digite o CNPJ, revise os dados e publique rápido."}
+                </p>
+              </div>
+              {isEditing ? (
+                <button
+                  type="button"
+                  onClick={newSite}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/10 px-4 text-sm font-bold text-slate-200 hover:bg-white/5"
+                >
+                  <X size={16} />
+                  Novo site
+                </button>
+              ) : null}
+            </div>
+
             <div className="grid gap-4 md:grid-cols-[1fr_auto]">
               <label className="grid gap-2">
                 <span className="text-xs font-bold uppercase text-slate-400">CNPJ</span>
@@ -371,7 +444,7 @@ export function SiteGeneratorPanel({
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-white px-5 text-sm font-black text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
-                PUBLICAR
+                {isEditing ? "SALVAR ALTERAÇÕES" : "PUBLICAR"}
               </button>
             </div>
 
@@ -405,14 +478,40 @@ export function SiteGeneratorPanel({
                 Preview local: <span className="font-mono text-emerald-300">/{form.slug || "empresa01"}</span>
               </p>
             </div>
+
+            <div className="mt-6 border-t border-white/10 pt-5">
+              <div className="flex items-center gap-3">
+                <div className="grid h-11 w-11 place-items-center rounded-lg bg-sky-400 text-slate-950">
+                  <Globe2 size={20} />
+                </div>
+                <div>
+                  <h2 className="font-black text-white">Domínios</h2>
+                  <p className="text-sm text-slate-400">Cloudflare é opcional.</p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 text-sm text-slate-300">
+                <p className="rounded-lg bg-white/5 p-3">
+                  Mais prático: usar Cloudflare para DNS e apontar wildcard{" "}
+                  <span className="font-mono text-sky-200">*.seudominio.com.br</span>{" "}
+                  para a Vercel.
+                </p>
+                <p className="rounded-lg bg-white/5 p-3">
+                  Sem Cloudflare também funciona, desde que seu registrador permita
+                  criar o wildcard no DNS.
+                </p>
+              </div>
+            </div>
           </aside>
         </section>
 
         <section className="rounded-lg border border-white/10 bg-panel-card">
           <div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-black text-white">Sites publicados</h2>
-              <p className="text-sm text-slate-400">Tabela simples para operar rápido.</p>
+              <h2 className="text-lg font-black text-white">Painel de sites</h2>
+              <p className="text-sm text-slate-400">
+                Publique primeiro, depois clique em Editar para colar Meta Tag ou
+                alterar dados.
+              </p>
             </div>
             <button
               type="button"
@@ -425,13 +524,14 @@ export function SiteGeneratorPanel({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1040px] text-left text-sm">
               <thead className="bg-white/[0.03] text-xs uppercase text-slate-500">
                 <tr>
                   <th className="px-5 py-3">Empresa</th>
                   <th className="px-5 py-3">CNPJ</th>
                   <th className="px-5 py-3">Domínio</th>
                   <th className="px-5 py-3">Subdomínio</th>
+                  <th className="px-5 py-3">Meta</th>
                   <th className="px-5 py-3 text-right">Ações</th>
                 </tr>
               </thead>
@@ -449,14 +549,26 @@ export function SiteGeneratorPanel({
                       <td className="px-5 py-4 text-slate-300">{site.dominio}</td>
                       <td className="px-5 py-4 font-mono text-emerald-300">{site.fullDomain}</td>
                       <td className="px-5 py-4">
+                        <span
+                          className={
+                            site.metaTag
+                              ? "rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-xs font-bold text-emerald-200"
+                              : "rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-bold text-amber-200"
+                          }
+                        >
+                          {site.metaTag ? "Meta OK" : "Sem Meta"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
                         <div className="flex justify-end gap-2">
                           <button
                             title="Editar"
                             type="button"
-                            onClick={() => setForm(site)}
-                            className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-slate-200 hover:bg-white/5"
+                            onClick={() => editSite(site)}
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 text-slate-200 hover:bg-white/5"
                           >
                             <Pencil size={16} />
+                            Editar
                           </button>
                           <a
                             title="Visualizar"
@@ -489,7 +601,7 @@ export function SiteGeneratorPanel({
                   ))
                 ) : (
                   <tr>
-                    <td className="px-5 py-8 text-center text-slate-500" colSpan={5}>
+                    <td className="px-5 py-8 text-center text-slate-500" colSpan={6}>
                       Nenhum site publicado ainda.
                     </td>
                   </tr>
