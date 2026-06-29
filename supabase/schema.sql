@@ -42,3 +42,20 @@ for each row execute function public.set_updated_at();
 
 -- MVP sem autenticação complexa:
 -- Use a SUPABASE_SERVICE_ROLE_KEY no servidor ou mantenha RLS desligado nessa tabela.
+
+create table if not exists public.domains (
+  id uuid primary key default gen_random_uuid(),
+  dominio text not null unique,
+  provider text not null default 'vercel',
+  status text not null default 'ready' check (status in ('ready', 'pending', 'inactive')),
+  notes text,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists domains_set_updated_at on public.domains;
+
+create trigger domains_set_updated_at
+before update on public.domains
+for each row execute function public.set_updated_at();

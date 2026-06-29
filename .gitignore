@@ -4,6 +4,7 @@ node_modules
 .env
 .env.local
 .alienbot-sites.json
+.alienbot-domains.json
 dev-server.log
 dev-server.err
 tsconfig.tsbuildinfo

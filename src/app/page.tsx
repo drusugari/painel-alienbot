@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { SiteGeneratorPanel } from "@/components/SiteGeneratorPanel";
 import { SiteTemplate } from "@/components/SiteTemplate";
 import { normalizeDomain, type Site } from "@/lib/site";
+import { listReadyDomains } from "@/lib/server/domains";
 import { findSiteByHost, getStorageMode, listSites } from "@/lib/server/sites";
 
 function getAvailableDomains(sites: Site[]) {
@@ -28,9 +29,11 @@ export default async function HomePage() {
   }
 
   const sites = await listSites();
+  const domains = await listReadyDomains();
   return (
     <SiteGeneratorPanel
       initialSites={sites}
+      initialDomains={domains}
       storageMode={getStorageMode()}
       availableDomains={getAvailableDomains(sites)}
     />

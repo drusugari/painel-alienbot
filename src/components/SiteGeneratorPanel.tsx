@@ -26,6 +26,7 @@ import {
   type BrasilApiCompany,
   type Site
 } from "@/lib/site";
+import type { ManagedDomain } from "@/lib/domain";
 import type { StorageMode } from "@/lib/server/sites";
 
 const emptySite: Site = normalizeSite({
@@ -109,15 +110,22 @@ async function fetchCnpjData(digits: string) {
 
 export function SiteGeneratorPanel({
   initialSites,
+  initialDomains = [],
   storageMode,
   availableDomains = []
 }: {
   initialSites: Site[];
+  initialDomains?: ManagedDomain[];
   storageMode: StorageMode;
   availableDomains?: string[];
 }) {
   const [form, setForm] = useState<Site>(emptySite);
   const [sites, setSites] = useState<Site[]>(initialSites);
+  const [domains, setDomains] = useState<ManagedDomain[]>(initialDomains);
+  const [domainInput, setDomainInput] = useState("");
+  const [domainProvider, setDomainProvider] = useState("vercel");
+  const [savingDomain, setSavingDomain] = useState(false);
+  const [domainMessage, setDomainMessage] = useState("");
   const [loadingCnpj, setLoadingCnpj] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -135,11 +143,12 @@ export function SiteGeneratorPanel({
       Array.from(
         new Set(
           [...availableDomains, ...sites.map((site) => site.dominio)]
+            .concat(domains.map((domain) => domain.dominio))
             .map(normalizeDomain)
             .filter(Boolean)
         )
       ).sort(),
-    [availableDomains, sites]
+    [availableDomains, domains, sites]
   );
   const missingSupabaseOnVercel = storageMode === "vercel-missing-supabase";
   const storageLabel =
@@ -153,6 +162,10 @@ export function SiteGeneratorPanel({
   useEffect(() => {
     setSites(initialSites);
   }, [initialSites]);
+
+  useEffect(() => {
+    setDomains(initialDomains);
+  }, [initialDomains]);
 
   function update<K extends keyof Site>(key: K, value: Site[K]) {
     setForm((current) => {
@@ -171,6 +184,58 @@ export function SiteGeneratorPanel({
     const response = await fetch("/api/sites", { cache: "no-store" });
     const data = await response.json();
     if (response.ok) setSites(data.sites || []);
+  }
+
+  async function refreshDomains() {
+    const response = await fetch("/api/domains", { cache: "no-store" });
+    const data = await response.json();
+    if (response.ok) setDomains(data.domains || []);
+  }
+
+  async function addDomain(event: FormEvent) {
+    event.preventDefault();
+    const dominio = normalizeDomain(domainInput);
+    if (!dominio) {
+      setDomainMessage("Informe um domínio válido.");
+      return;
+    }
+
+    setSavingDomain(true);
+    setDomainMessage("");
+
+    try {
+      const response = await fetch("/api/domains", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dominio,
+          provider: domainProvider,
+          status: "ready",
+          active: true
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Não consegui salvar domínio.");
+
+      await refreshDomains();
+      if (!form.dominio) update("dominio", data.domain.dominio);
+      setDomainInput("");
+      setDomainMessage(`Domínio pronto: ${data.domain.dominio}`);
+    } catch (error) {
+      setDomainMessage(error instanceof Error ? error.message : "Falha ao salvar domínio.");
+    } finally {
+      setSavingDomain(false);
+    }
+  }
+
+  async function removeDomain(domain: ManagedDomain) {
+    if (!domain.id) return;
+    const response = await fetch(`/api/domains/${domain.id}`, { method: "DELETE" });
+    if (response.ok) {
+      setDomains((current) => current.filter((item) => item.id !== domain.id));
+      if (form.dominio === domain.dominio) update("dominio", "");
+      setDomainMessage("Domínio removido da lista.");
+    }
   }
 
   async function generateData() {
@@ -223,6 +288,11 @@ export function SiteGeneratorPanel({
 
   async function publish(event: FormEvent) {
     event.preventDefault();
+    if (!form.dominio) {
+      setMessage("Selecione um domínio pronto antes de publicar.");
+      return;
+    }
+
     setSaving(true);
     setMessage("");
 
@@ -434,18 +504,20 @@ export function SiteGeneratorPanel({
               </label>
               <label className="grid gap-2">
                 <span className="text-xs font-bold uppercase text-slate-400">Domínio</span>
-                <input
+                <select
                   value={form.dominio}
                   onChange={(event) => update("dominio", event.target.value)}
-                  placeholder="empresa.com.br"
-                  list="alienbot-domains"
                   className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-emerald-300/30 transition focus:ring-4"
-                />
-                <datalist id="alienbot-domains">
+                >
+                  <option value="">
+                    {domainOptions.length
+                      ? "Selecione um domínio pronto"
+                      : "Cadastre um domínio pronto"}
+                  </option>
                   {domainOptions.map((domain) => (
                     <option key={domain} value={domain} />
                   ))}
-                </datalist>
+                </select>
               </label>
             </div>
 
@@ -540,6 +612,72 @@ export function SiteGeneratorPanel({
                   <p className="text-sm text-slate-400">Cloudflare é opcional.</p>
                 </div>
               </div>
+              <form onSubmit={addDomain} className="mt-4 grid gap-3">
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    value={domainInput}
+                    onChange={(event) => setDomainInput(event.target.value)}
+                    placeholder="dominio.com.br"
+                    className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-sky-300/30 transition focus:ring-4"
+                  />
+                  <select
+                    value={domainProvider}
+                    onChange={(event) => setDomainProvider(event.target.value)}
+                    className="h-11 rounded-lg border border-white/10 bg-white/5 px-3 text-white outline-none ring-sky-300/30 transition focus:ring-4"
+                  >
+                    <option value="vercel">Vercel</option>
+                    <option value="cloudflare">Cloudflare</option>
+                    <option value="hostinger">Hostinger</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingDomain || missingSupabaseOnVercel}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-sky-300/30 bg-sky-300/10 px-4 text-sm font-black text-sky-100 hover:bg-sky-300/15 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingDomain ? <Loader2 className="animate-spin" size={16} /> : <Globe2 size={16} />}
+                  ADICIONAR DOMÍNIO PRONTO
+                </button>
+              </form>
+
+              {domains.length ? (
+                <div className="mt-4 grid gap-2">
+                  {domains.map((domain) => (
+                    <div
+                      key={domain.id || domain.dominio}
+                      className="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm"
+                    >
+                      <div>
+                        <div className="font-mono text-sky-100">{domain.dominio}</div>
+                        <div className="text-xs uppercase text-slate-500">
+                          {domain.provider} - pronto
+                        </div>
+                      </div>
+                      {domain.id ? (
+                        <button
+                          type="button"
+                          onClick={() => removeDomain(domain)}
+                          className="grid h-8 w-8 place-items-center rounded-lg border border-red-400/20 text-red-200 hover:bg-red-400/10"
+                          title="Remover domínio"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 rounded-lg bg-white/5 p-3 text-sm text-slate-300">
+                  Nenhum domínio pronto cadastrado no banco ainda.
+                </p>
+              )}
+
+              {domainMessage ? (
+                <p className="mt-3 rounded-lg border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-sm text-sky-100">
+                  {domainMessage}
+                </p>
+              ) : null}
+
               <div className="mt-4 grid gap-3 text-sm text-slate-300">
                 <p className="rounded-lg bg-white/5 p-3">
                   Para rodar hoje sem wildcard: conecte o domínio na Vercel
