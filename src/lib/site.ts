@@ -68,6 +68,8 @@ export type SiteRow = {
   updated_at?: string;
 };
 
+export const ROOT_DOMAIN_SLUG = "@";
+
 export const SITE_PAGES: SitePage[] = [
   "home",
   "empresa",
@@ -100,6 +102,10 @@ export function slugify(value: string) {
     .slice(0, 60);
 }
 
+export function isRootDomainSlug(value?: string) {
+  return (value || "").trim() === ROOT_DOMAIN_SLUG;
+}
+
 export function normalizeDomain(value: string) {
   return value
     .replace(/^https?:\/\//i, "")
@@ -118,8 +124,10 @@ export function titleCase(value: string) {
 }
 
 export function makeFullDomain(slug: string, dominio: string) {
-  const cleanSlug = slugify(slug);
   const cleanDomain = normalizeDomain(dominio);
+  if (isRootDomainSlug(slug)) return cleanDomain;
+
+  const cleanSlug = slugify(slug);
   return cleanSlug && cleanDomain ? `${cleanSlug}.${cleanDomain}` : "";
 }
 
@@ -132,7 +140,10 @@ export function hashToThemeId(seed: string) {
 }
 
 export function normalizeSite(input: Partial<Site>): Site {
-  const slug = slugify(input.slug || input.nomeFantasia || input.razaoSocial || "");
+  const rawSlug = (input.slug || "").trim();
+  const slug = isRootDomainSlug(rawSlug)
+    ? ROOT_DOMAIN_SLUG
+    : slugify(rawSlug || input.nomeFantasia || input.razaoSocial || "");
   const dominio = normalizeDomain(input.dominio || "");
   const fullDomain = makeFullDomain(slug, dominio);
   const razaoSocial = (input.razaoSocial || "").trim();

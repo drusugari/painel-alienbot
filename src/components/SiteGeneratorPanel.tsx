@@ -15,10 +15,13 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   hashToThemeId,
+  isRootDomainSlug,
   makeFullDomain,
   maskCnpj,
+  normalizeDomain,
   normalizeSite,
   onlyDigits,
+  ROOT_DOMAIN_SLUG,
   slugify,
   titleCase,
   type BrasilApiCompany,
@@ -40,10 +43,18 @@ const emptySite: Site = normalizeSite({
   estado: "",
   cep: "",
   atividadePrincipal: "",
-  slug: "",
+  slug: ROOT_DOMAIN_SLUG,
   dominio: "",
   metaTag: ""
 });
+
+function siteHref(site: Site) {
+  return site.fullDomain ? `https://${site.fullDomain}` : `/${site.slug}`;
+}
+
+function publicationLabel(site: Site) {
+  return isRootDomainSlug(site.slug) ? "Domínio raiz" : site.slug;
+}
 
 function activityFromBrasilApi(data: BrasilApiCompany) {
   if (!data.cnae_fiscal_descricao) return "";
@@ -99,20 +110,34 @@ async function fetchCnpjData(digits: string) {
 
 export function SiteGeneratorPanel({
   initialSites,
-  storageMode
+  storageMode,
+  availableDomains = []
 }: {
   initialSites: Site[];
   storageMode: StorageMode;
+  availableDomains?: string[];
 }) {
   const [form, setForm] = useState<Site>(emptySite);
   const [sites, setSites] = useState<Site[]>(initialSites);
   const [loadingCnpj, setLoadingCnpj] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const isRootDomain = isRootDomainSlug(form.slug);
 
   const fullDomain = useMemo(
     () => makeFullDomain(form.slug, form.dominio),
     [form.slug, form.dominio]
+  );
+  const domainOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...availableDomains, ...sites.map((site) => site.dominio)]
+            .map(normalizeDomain)
+            .filter(Boolean)
+        )
+      ).sort(),
+    [availableDomains, sites]
   );
   const missingSupabaseOnVercel = storageMode === "vercel-missing-supabase";
   const storageLabel =
@@ -140,6 +165,21 @@ export function SiteGeneratorPanel({
     });
   }
 
+  function setPublicationMode(mode: "root" | "subdomain") {
+    setForm((current) => {
+      const nextSlug =
+        mode === "root"
+          ? ROOT_DOMAIN_SLUG
+          : slugify(current.nomeFantasia || current.razaoSocial || "") || "";
+
+      return {
+        ...current,
+        slug: nextSlug,
+        fullDomain: makeFullDomain(nextSlug, current.dominio)
+      };
+    });
+  }
+
   async function refreshSites() {
     const response = await fetch("/api/sites", { cache: "no-store" });
     const data = await response.json();
@@ -161,7 +201,9 @@ export function SiteGeneratorPanel({
 
       const razaoSocial = data.razao_social || "";
       const nomeFantasia = data.nome_fantasia || razaoSocial;
-      const nextSlug = form.slug || slugify(nomeFantasia || razaoSocial);
+      const nextSlug = isRootDomain
+        ? ROOT_DOMAIN_SLUG
+        : form.slug || slugify(nomeFantasia || razaoSocial);
       const telefone = onlyDigits(data.ddd_telefone_1 || "");
       const atividadePrincipal = activityFromBrasilApi(data);
       const next = normalizeSite({
@@ -395,14 +437,51 @@ export function SiteGeneratorPanel({
               ))}
             </div>
 
+            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <span className="text-xs font-bold uppercase text-slate-400">
+                Publicação
+              </span>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setPublicationMode("root")}
+                  className={
+                    isRootDomain
+                      ? "rounded-lg border border-emerald-300/40 bg-emerald-300/15 px-4 py-3 text-left text-sm font-bold text-emerald-100"
+                      : "rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-300 hover:bg-white/10"
+                  }
+                >
+                  Domínio raiz
+                  <span className="mt-1 block text-xs font-normal text-slate-400">
+                    Publica direto em dominio.com.br
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPublicationMode("subdomain")}
+                  className={
+                    !isRootDomain
+                      ? "rounded-lg border border-emerald-300/40 bg-emerald-300/15 px-4 py-3 text-left text-sm font-bold text-emerald-100"
+                      : "rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-300 hover:bg-white/10"
+                  }
+                >
+                  Subdomínio
+                  <span className="mt-1 block text-xs font-normal text-slate-400">
+                    Usa slug.dominio.com.br quando houver wildcard
+                  </span>
+                </button>
+              </div>
+            </div>
+
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
                 <span className="text-xs font-bold uppercase text-slate-400">Slug</span>
                 <input
-                  value={form.slug}
+                  value={isRootDomain ? "" : form.slug}
                   onChange={(event) => update("slug", slugify(event.target.value))}
-                  placeholder="empresa01"
-                  className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-emerald-300/30 transition focus:ring-4"
+                  placeholder={isRootDomain ? "sem subdomínio" : "empresa01"}
+                  disabled={isRootDomain}
+                  className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-emerald-300/30 transition focus:ring-4 disabled:cursor-not-allowed disabled:text-slate-500"
                 />
               </label>
               <label className="grid gap-2">
@@ -411,10 +490,31 @@ export function SiteGeneratorPanel({
                   value={form.dominio}
                   onChange={(event) => update("dominio", event.target.value)}
                   placeholder="empresa.com.br"
+                  list="alienbot-domains"
                   className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-emerald-300/30 transition focus:ring-4"
                 />
+                <datalist id="alienbot-domains">
+                  {domainOptions.map((domain) => (
+                    <option key={domain} value={domain} />
+                  ))}
+                </datalist>
               </label>
             </div>
+
+            {domainOptions.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {domainOptions.map((domain) => (
+                  <button
+                    key={domain}
+                    type="button"
+                    onClick={() => update("dominio", domain)}
+                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-slate-300 hover:border-emerald-300/40 hover:text-emerald-200"
+                  >
+                    {domain}
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             <label className="mt-4 grid gap-2">
               <span className="text-xs font-bold uppercase text-slate-400">
@@ -435,7 +535,8 @@ export function SiteGeneratorPanel({
                   Resultado final
                 </span>
                 <p className="mt-1 font-mono text-sm text-emerald-300">
-                  {fullDomain || "slug.dominio.com.br"}
+                  {fullDomain ||
+                    (isRootDomain ? "dominio.com.br" : "slug.dominio.com.br")}
                 </p>
               </div>
               <button
@@ -468,14 +569,17 @@ export function SiteGeneratorPanel({
             <div className="mt-5 grid gap-3 text-sm text-slate-300">
               <p className="rounded-lg bg-white/5 p-3">
                 Paleta, imagem do hero, fonte, botões, header, cards, footer e bordas
-                são escolhidos a partir do slug + domínio + CNPJ.
+                são escolhidos a partir do domínio + CNPJ.
               </p>
               <p className="rounded-lg bg-white/5 p-3">
                 O visual não muda a cada refresh: Meta, Google e usuário sempre veem
                 o mesmo layout daquele site.
               </p>
               <p className="rounded-lg bg-white/5 p-3">
-                Preview local: <span className="font-mono text-emerald-300">/{form.slug || "empresa01"}</span>
+                Link final:{" "}
+                <span className="font-mono text-emerald-300">
+                  {fullDomain ? `https://${fullDomain}` : "https://dominio.com.br"}
+                </span>
               </p>
             </div>
 
@@ -491,13 +595,12 @@ export function SiteGeneratorPanel({
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-300">
                 <p className="rounded-lg bg-white/5 p-3">
-                  Mais prático: usar Cloudflare para DNS e apontar wildcard{" "}
-                  <span className="font-mono text-sky-200">*.seudominio.com.br</span>{" "}
-                  para a Vercel.
+                  Para rodar hoje sem wildcard: conecte cada domínio raiz na Vercel
+                  e publique no modo Domínio raiz.
                 </p>
                 <p className="rounded-lg bg-white/5 p-3">
-                  Sem Cloudflare também funciona, desde que seu registrador permita
-                  criar o wildcard no DNS.
+                  No Cloudflare/Hostinger, aponte o domínio para os registros que a
+                  Vercel mostrar e depois clique em Refresh na Vercel.
                 </p>
               </div>
             </div>
@@ -530,7 +633,7 @@ export function SiteGeneratorPanel({
                   <th className="px-5 py-3">Empresa</th>
                   <th className="px-5 py-3">CNPJ</th>
                   <th className="px-5 py-3">Domínio</th>
-                  <th className="px-5 py-3">Subdomínio</th>
+                  <th className="px-5 py-3">Publicação</th>
                   <th className="px-5 py-3">Meta</th>
                   <th className="px-5 py-3 text-right">Ações</th>
                 </tr>
@@ -547,7 +650,12 @@ export function SiteGeneratorPanel({
                       </td>
                       <td className="px-5 py-4 font-mono text-slate-300">{site.cnpj}</td>
                       <td className="px-5 py-4 text-slate-300">{site.dominio}</td>
-                      <td className="px-5 py-4 font-mono text-emerald-300">{site.fullDomain}</td>
+                      <td className="px-5 py-4">
+                        <div className="font-mono text-emerald-300">{site.fullDomain}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {publicationLabel(site)}
+                        </div>
+                      </td>
                       <td className="px-5 py-4">
                         <span
                           className={
@@ -572,7 +680,7 @@ export function SiteGeneratorPanel({
                           </button>
                           <a
                             title="Visualizar"
-                            href={`/${site.slug}`}
+                            href={siteHref(site)}
                             target="_blank"
                             rel="noreferrer"
                             className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-slate-200 hover:bg-white/5"

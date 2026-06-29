@@ -6,6 +6,7 @@ import {
   hashToThemeId,
   makeFullDomain,
   normalizeSite,
+  ROOT_DOMAIN_SLUG,
   rowToSite,
   siteToRow,
   slugify,
@@ -167,18 +168,24 @@ export async function findSiteByHost(host: string): Promise<Site | null> {
   if (!cleanHost || cleanHost === "localhost" || cleanHost === "127.0.0.1") {
     return null;
   }
+  const hostCandidates = Array.from(
+    new Set([cleanHost, cleanHost.replace(/^www\./, "")].filter(Boolean))
+  );
 
   if (!hasSupabase()) {
     if (!canUseLocalStore()) return null;
     return (
-      (await readLocalSites()).find((site) => site.fullDomain === cleanHost) || null
+      (await readLocalSites()).find((site) =>
+        hostCandidates.includes(site.fullDomain)
+      ) || null
     );
   }
 
   const { data, error } = await supabase()
     .from("sites")
     .select("*")
-    .eq("full_domain", cleanHost)
+    .in("full_domain", hostCandidates)
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;
@@ -204,9 +211,13 @@ export async function duplicateSite(id: string): Promise<Site> {
   if (!source) throw new Error("Site não encontrado.");
 
   let index = 2;
-  let nextSlug = `${source.slug}-copia`;
+  const baseSlug =
+    source.slug === ROOT_DOMAIN_SLUG
+      ? slugify(source.nomeFantasia || source.razaoSocial || "site")
+      : source.slug;
+  let nextSlug = `${baseSlug || "site"}-copia`;
   while (sites.some((site) => site.slug === nextSlug && site.dominio === source.dominio)) {
-    nextSlug = `${source.slug}-copia-${index}`;
+    nextSlug = `${baseSlug || "site"}-copia-${index}`;
     index += 1;
   }
 
