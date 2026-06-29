@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { Site, SitePage } from "@/lib/site";
+import { makePublicUrl, type Site, type SitePage } from "@/lib/site";
 
 type ParsedMetaTag = {
   key: string;
@@ -42,13 +42,16 @@ export function buildSiteMetadata(site: Site, page: SitePage = "home"): Metadata
   const title = siteTitle(site, page);
   const description = siteDescription(site);
   const parsedMetaTag = parseMetaTag(site.metaTag);
+  const url = makePublicUrl(site.slug, site.dominio, page);
 
   return {
     title,
     description,
+    alternates: url ? { canonical: url } : undefined,
     openGraph: {
       title,
       description,
+      url: url || undefined,
       type: "website",
       siteName: site.nomeFantasia || site.razaoSocial,
       locale: "pt_BR"

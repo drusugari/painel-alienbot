@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { SiteTemplate } from "@/components/SiteTemplate";
 import { buildSiteMetadata } from "@/lib/meta";
 import { SITE_PAGES, type SitePage } from "@/lib/site";
-import { findSiteByHost, findSiteBySlug } from "@/lib/server/sites";
+import { findSiteByHost, findSiteBySlugForHost } from "@/lib/server/sites";
 
 type CatchAllProps = {
   params: { segments?: string[] };
@@ -21,7 +21,7 @@ async function resolveRequest(segments: string[] = []) {
 
   const [slug, maybePage] = segments;
   if (!slug) return null;
-  const site = await findSiteBySlug(slug);
+  const site = await findSiteBySlugForHost(slug, host);
   if (!site) return null;
 
   const page = (maybePage || "home") as SitePage;

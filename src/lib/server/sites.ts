@@ -5,8 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 import {
   hashToThemeId,
   makeFullDomain,
+  normalizeDomain,
   normalizeSite,
-  ROOT_DOMAIN_SLUG,
   rowToSite,
   siteToRow,
   slugify,
@@ -68,6 +68,19 @@ async function readLocalSites() {
 
 async function writeLocalSites(sites: Site[]) {
   await fs.writeFile(localStorePath, JSON.stringify(sites, null, 2), "utf8");
+}
+
+function hostToDomain(host: string) {
+  return normalizeDomain(host.split(":")[0] || "");
+}
+
+function isPreviewHost(domain: string) {
+  return (
+    !domain ||
+    domain === "localhost" ||
+    domain === "127.0.0.1" ||
+    domain.endsWith(".vercel.app")
+  );
 }
 
 export function isSupabaseConfigured() {
@@ -163,6 +176,35 @@ export async function findSiteBySlug(slug: string): Promise<Site | null> {
   return data ? rowToSite(data as SiteRow) : null;
 }
 
+export async function findSiteBySlugForHost(
+  slug: string,
+  host: string
+): Promise<Site | null> {
+  const cleanSlug = slugify(slug);
+  const cleanDomain = hostToDomain(host);
+  if (!cleanSlug) return null;
+  if (isPreviewHost(cleanDomain)) return findSiteBySlug(cleanSlug);
+
+  if (!hasSupabase()) {
+    if (!canUseLocalStore()) return null;
+    return (
+      (await readLocalSites()).find(
+        (site) => site.slug === cleanSlug && site.dominio === cleanDomain
+      ) || null
+    );
+  }
+
+  const { data, error } = await supabase()
+    .from("sites")
+    .select("*")
+    .eq("slug", cleanSlug)
+    .eq("dominio", cleanDomain)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? rowToSite(data as SiteRow) : null;
+}
+
 export async function findSiteByHost(host: string): Promise<Site | null> {
   const cleanHost = host.split(":")[0]?.toLowerCase() || "";
   if (!cleanHost || cleanHost === "localhost" || cleanHost === "127.0.0.1") {
@@ -211,10 +253,7 @@ export async function duplicateSite(id: string): Promise<Site> {
   if (!source) throw new Error("Site não encontrado.");
 
   let index = 2;
-  const baseSlug =
-    source.slug === ROOT_DOMAIN_SLUG
-      ? slugify(source.nomeFantasia || source.razaoSocial || "site")
-      : source.slug;
+  const baseSlug = source.slug || slugify(source.nomeFantasia || source.razaoSocial || "site");
   let nextSlug = `${baseSlug || "site"}-copia`;
   while (sites.some((site) => site.slug === nextSlug && site.dominio === source.dominio)) {
     nextSlug = `${baseSlug || "site"}-copia-${index}`;

@@ -15,13 +15,12 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   hashToThemeId,
-  isRootDomainSlug,
   makeFullDomain,
+  makePublicUrl,
   maskCnpj,
   normalizeDomain,
   normalizeSite,
   onlyDigits,
-  ROOT_DOMAIN_SLUG,
   slugify,
   titleCase,
   type BrasilApiCompany,
@@ -43,17 +42,17 @@ const emptySite: Site = normalizeSite({
   estado: "",
   cep: "",
   atividadePrincipal: "",
-  slug: ROOT_DOMAIN_SLUG,
+  slug: "",
   dominio: "",
   metaTag: ""
 });
 
 function siteHref(site: Site) {
-  return site.fullDomain ? `https://${site.fullDomain}` : `/${site.slug}`;
+  return makePublicUrl(site.slug, site.dominio) || `/${site.slug}`;
 }
 
 function publicationLabel(site: Site) {
-  return isRootDomainSlug(site.slug) ? "Domínio raiz" : site.slug;
+  return `slug: ${site.slug}`;
 }
 
 function activityFromBrasilApi(data: BrasilApiCompany) {
@@ -122,10 +121,13 @@ export function SiteGeneratorPanel({
   const [loadingCnpj, setLoadingCnpj] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const isRootDomain = isRootDomainSlug(form.slug);
 
   const fullDomain = useMemo(
     () => makeFullDomain(form.slug, form.dominio),
+    [form.slug, form.dominio]
+  );
+  const publicUrl = useMemo(
+    () => makePublicUrl(form.slug, form.dominio),
     [form.slug, form.dominio]
   );
   const domainOptions = useMemo(
@@ -165,21 +167,6 @@ export function SiteGeneratorPanel({
     });
   }
 
-  function setPublicationMode(mode: "root" | "subdomain") {
-    setForm((current) => {
-      const nextSlug =
-        mode === "root"
-          ? ROOT_DOMAIN_SLUG
-          : slugify(current.nomeFantasia || current.razaoSocial || "") || "";
-
-      return {
-        ...current,
-        slug: nextSlug,
-        fullDomain: makeFullDomain(nextSlug, current.dominio)
-      };
-    });
-  }
-
   async function refreshSites() {
     const response = await fetch("/api/sites", { cache: "no-store" });
     const data = await response.json();
@@ -201,9 +188,7 @@ export function SiteGeneratorPanel({
 
       const razaoSocial = data.razao_social || "";
       const nomeFantasia = data.nome_fantasia || razaoSocial;
-      const nextSlug = isRootDomain
-        ? ROOT_DOMAIN_SLUG
-        : form.slug || slugify(nomeFantasia || razaoSocial);
+      const nextSlug = form.slug || slugify(nomeFantasia || razaoSocial);
       const telefone = onlyDigits(data.ddd_telefone_1 || "");
       const atividadePrincipal = activityFromBrasilApi(data);
       const next = normalizeSite({
@@ -258,8 +243,8 @@ export function SiteGeneratorPanel({
       await refreshSites();
       setMessage(
         isEditing
-          ? `Alterações salvas: ${data.site.fullDomain}`
-          : `Publicado: ${data.site.fullDomain}`
+          ? `Alterações salvas: ${siteHref(data.site)}`
+          : `Publicado: ${siteHref(data.site)}`
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao publicar.");
@@ -304,7 +289,7 @@ export function SiteGeneratorPanel({
     const data = await response.json();
     if (response.ok) {
       await refreshSites();
-      setMessage(`Duplicado: ${data.site.fullDomain}`);
+      setMessage(`Duplicado: ${siteHref(data.site)}`);
     } else {
       setMessage(data.error || "Não consegui duplicar.");
     }
@@ -437,51 +422,14 @@ export function SiteGeneratorPanel({
               ))}
             </div>
 
-            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
-              <span className="text-xs font-bold uppercase text-slate-400">
-                Publicação
-              </span>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setPublicationMode("root")}
-                  className={
-                    isRootDomain
-                      ? "rounded-lg border border-emerald-300/40 bg-emerald-300/15 px-4 py-3 text-left text-sm font-bold text-emerald-100"
-                      : "rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-300 hover:bg-white/10"
-                  }
-                >
-                  Domínio raiz
-                  <span className="mt-1 block text-xs font-normal text-slate-400">
-                    Publica direto em dominio.com.br
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPublicationMode("subdomain")}
-                  className={
-                    !isRootDomain
-                      ? "rounded-lg border border-emerald-300/40 bg-emerald-300/15 px-4 py-3 text-left text-sm font-bold text-emerald-100"
-                      : "rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-300 hover:bg-white/10"
-                  }
-                >
-                  Subdomínio
-                  <span className="mt-1 block text-xs font-normal text-slate-400">
-                    Usa slug.dominio.com.br quando houver wildcard
-                  </span>
-                </button>
-              </div>
-            </div>
-
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
                 <span className="text-xs font-bold uppercase text-slate-400">Slug</span>
                 <input
-                  value={isRootDomain ? "" : form.slug}
+                  value={form.slug}
                   onChange={(event) => update("slug", slugify(event.target.value))}
-                  placeholder={isRootDomain ? "sem subdomínio" : "empresa01"}
-                  disabled={isRootDomain}
-                  className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-emerald-300/30 transition focus:ring-4 disabled:cursor-not-allowed disabled:text-slate-500"
+                  placeholder="empresa01"
+                  className="h-11 rounded-lg border border-white/10 bg-white/5 px-4 text-white outline-none ring-emerald-300/30 transition focus:ring-4"
                 />
               </label>
               <label className="grid gap-2">
@@ -535,8 +483,7 @@ export function SiteGeneratorPanel({
                   Resultado final
                 </span>
                 <p className="mt-1 font-mono text-sm text-emerald-300">
-                  {fullDomain ||
-                    (isRootDomain ? "dominio.com.br" : "slug.dominio.com.br")}
+                  {publicUrl || "https://dominio.com.br/slug"}
                 </p>
               </div>
               <button
@@ -578,7 +525,7 @@ export function SiteGeneratorPanel({
               <p className="rounded-lg bg-white/5 p-3">
                 Link final:{" "}
                 <span className="font-mono text-emerald-300">
-                  {fullDomain ? `https://${fullDomain}` : "https://dominio.com.br"}
+                  {publicUrl || "https://dominio.com.br/slug"}
                 </span>
               </p>
             </div>
@@ -595,8 +542,8 @@ export function SiteGeneratorPanel({
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-300">
                 <p className="rounded-lg bg-white/5 p-3">
-                  Para rodar hoje sem wildcard: conecte cada domínio raiz na Vercel
-                  e publique no modo Domínio raiz.
+                  Para rodar hoje sem wildcard: conecte o domínio na Vercel
+                  e publique os sites usando slug no caminho.
                 </p>
                 <p className="rounded-lg bg-white/5 p-3">
                   No Cloudflare/Hostinger, aponte o domínio para os registros que a
@@ -651,7 +598,7 @@ export function SiteGeneratorPanel({
                       <td className="px-5 py-4 font-mono text-slate-300">{site.cnpj}</td>
                       <td className="px-5 py-4 text-slate-300">{site.dominio}</td>
                       <td className="px-5 py-4">
-                        <div className="font-mono text-emerald-300">{site.fullDomain}</div>
+                        <div className="font-mono text-emerald-300">{siteHref(site)}</div>
                         <div className="mt-1 text-xs text-slate-500">
                           {publicationLabel(site)}
                         </div>
